@@ -196,6 +196,8 @@ local function workFiles()
     term.clear()
     local iterator = fs.list("./sync")
     if iterator then
+        package.path =
+        "/lib/?.lua;/usr/lib/?.lua;/home/lib/?.lua;./?.lua;/lib/?/init.lua;/usr/lib/?/init.lua;/home/lib/?/init.lua;./?/init.lua;/?.lua"
         for entry in iterator do
             full_path = fs.concat("./sync", entry)
             if full_path == "sync/main.lua" then

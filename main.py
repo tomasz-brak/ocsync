@@ -38,4 +38,9 @@ def ping():
     return "pong"
 
 
+print(
+    "!!! WARNING !!! \n This program may expose parts/entirety of your drive to the internet"
+)
+input("Press any key to continue...")
+
 app.run("0.0.0.0", 51820, debug=True)
