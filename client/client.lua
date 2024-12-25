@@ -1,9 +1,12 @@
+local URL = "http://will-al.gl.at.ply.gg:17637"
+
 local json = require("jsonl")
 
 
 -- oc libs
 local fs = require("filesystem")
 local io = require("io")
+local colors = require("colors")
 local component = require("component")
 
 
@@ -12,7 +15,7 @@ local term = require "term"
 local unicode = require "unicode"
 
 local gpu = component.gpu
-function dump(o)
+local function dump(o)
     if type(o) == 'table' then
         local s = '{ '
         for k, v in pairs(o) do
@@ -29,7 +32,7 @@ local char_to_hex = function(c)
     return string.format("%%%02X", string.byte(c))
 end
 
-local function urlencode(url)
+local function URLEncode(url)
     if url == nil then
         return
     end
@@ -39,40 +42,22 @@ local function urlencode(url)
     return url
 end
 
-local hex_to_char = function(x)
-    return string.char(tonumber(x, 16))
-end
 
-local urldecode = function(url)
-    if url == nil then
-        return
-    end
-    url = url:gsub("+", " ")
-    url = url:gsub("%%(%x%x)", hex_to_char)
-    return url
-end
-
-
-
-local URL = "http://will-al.gl.at.ply.gg:17637"
 --- @return string
 --- @param url string
 local function doRequest(url)
-    -- print("Doing request on: " .. url)
     local internet = require("internet")
-
     local handle = internet.request(url)
     local result = ""
-
     for chunk in handle do
         result = result .. chunk
     end
-    -- print(result)
-
     return result
 end
 
-function toHex(data)
+--- @return string
+--- @param data string bytes
+local function toHex(data)
     return (data:gsub('.', function(c)
         return string.format('%02X', string.byte(c))
     end))
@@ -80,64 +65,37 @@ end
 
 local remoteFiles = {}
 
--- --- @param path string
--- function fetchAndWriteFile(path)
---     print("Requesting: ", path)
---     fileContent = doRequest(URL .. "/fetchfile" .. path)
---     print(fileContent)
---     remoteFiles[path] = nil
--- end
-
-
-function replaceLineBreak(input_str)
-    -- Decode %0D%0A into \\r\\n (CRLF)
-    input_str = input_str:gsub("%%0D%%0A", "\n")
-
-    -- Decode %0D into \\r (CR)
-    input_str = input_str:gsub("%%0D", "\n")
-
-    -- Decode %0A into \\n (LF)
-    input_str = input_str:gsub("%%0A", "\n")
-
-    return input_str
-end
-
 local function excludeMismatchMD5recursive(dir_path)
     local iterator = fs.list(dir_path)
     if not iterator then
-        -- print("Error listing directory: " .. dir_path)
+        print("Error listing directory: " .. dir_path)
         return
     end
 
     for entry in iterator do
         local full_path = fs.concat(dir_path, entry)
         if fs.isDirectory(full_path) then
-            excludeMismatchMD5recursive(full_path) -- Recursive call for directories
+            excludeMismatchMD5recursive(full_path)
         else
-            no_slash_path = fs.canonical(full_path)
+            local no_slash_path = fs.canonical(full_path)
             full_path = "/" .. fs.canonical(full_path)
-            content = ""
-            -- for line in io.open(full_path) do
-            --     content = content .. line
-            -- end
-            local file = io.open(full_path, "r")
-            local content = file:read("*a")
-            local localHash = toHex(component.data.md5(content))
-            local localHashTrailingEnter = toHex(component.data.md5(content .. "\r")) -- THIS exsists because CRLF is garbage
+
             -- print("Hash check in progress\n local hash is: ",
             --     localHash, ", remote is: ", remoteFiles[no_slash_path], ", match?: ", localHash ==
             --     remoteFiles[no_slash_path], ", filecontent = ", content, "endofdebugmsg")
 
             if remoteFiles[no_slash_path] ~= nil then
-                if localHash ~= remoteFiles[no_slash_path] and localHashTrailingEnter ~= remoteFiles[no_slash_path] then
-                    print("Hash mismatch in file: ", no_slash_path,
-                        ", local: " .. localHash .. ", remote: " .. remoteFiles[no_slash_path])
+                local file = io.open(full_path, "r")
+                if file == nil then
+                    return
+                end
+                local content = file:read("*a")
+                local localHash = toHex(component.data.md5(content))
+                if localHash ~= remoteFiles[no_slash_path] then
+                    -- print("Hash mismatch in file: ", no_slash_path,
+                    --     ", local: " .. localHash .. ", remote: " .. remoteFiles[no_slash_path])
                     fs.remove(full_path)
                 end
-            end
-            if full_path == "/sync/lua.lua" then
-                print("start", (urlencode(content)), "<=>",
-                    (urlencode((doRequest(URL .. "/fetchfile/sync/lua.lua")))), "end")
             end
         end
     end
@@ -145,7 +103,6 @@ end
 
 local remoteFilesToBeConsumed
 local localFilesToBeRemoved = {}
-
 
 local function findMissingRecursive(dir_path)
     local iterator = fs.list(dir_path)
@@ -157,32 +114,29 @@ local function findMissingRecursive(dir_path)
     for entry in iterator do
         local full_path = fs.concat(dir_path, entry)
         if fs.isDirectory(full_path) then
-            findMissingRecursive(full_path) -- Recursive call for directories
+            findMissingRecursive(full_path)
         else
             local no_slash_path = full_path
             full_path = "/" .. fs.canonical(full_path)
             if remoteFilesToBeConsumed[no_slash_path] ~= nil then
-                print("File missing: " .. no_slash_path)
                 remoteFilesToBeConsumed[no_slash_path] = nil
             else
-                localFilesToBeRemoved[no_slash_path] = 1
+                table.insert(localFilesToBeRemoved, full_path)
             end
         end
     end
 end
 
-function getPath(str)
+local function getPath(str)
     return str:match("(.*[/\\])")
 end
 
 local function fetchMissing(missingFiles)
     for path, hash in pairs(missingFiles) do
-        print("Checking: ", path, ", hash: ", hash)
         if hash ~= nil then
             path = "/" .. path
-            print("Now requesting: ", path, "with hash: ", hash)
+            print("Now requesting: ", path)
             local dirpath = getPath(path)
-            -- print("Making dir ", dirpath)
             fs.makeDirectory(dirpath)
             local f = fs.open(path, "w")
             f:write(doRequest(URL .. "/fetchfile" .. path))
@@ -191,9 +145,33 @@ local function fetchMissing(missingFiles)
     end
 end
 
+--- @param files table
+local function remove(files)
+    for i, path in pairs(files) do
+        fs.remove(path)
+        print("Removing: ", path)
+    end
+end
 
---Main loop
-while true do
+local color = {}
+
+function color.red()
+    gpu.setForeground(0xff1111)
+end
+
+function color.green()
+    gpu.setForeground(0x11ff11)
+end
+
+function color.blue()
+    gpu.setForeground(0x1111ff)
+end
+
+function color.clear()
+    gpu.setForeground(0xffffff)
+end
+
+local function workFiles()
     fs.makeDirectory("./sync")
     local response = json.parse(doRequest(URL .. "/filelist"))
     for path, rHash in pairs(response) do
@@ -203,22 +181,61 @@ while true do
 
 
     remoteFilesToBeConsumed = remoteFiles
-    print("Before consume:")
-    print(dump(remoteFilesToBeConsumed))
+    localFilesToBeRemoved = {}
     findMissingRecursive("./sync")
 
-    print("Housekeeping Done.")
-    print("After consume:")
-    print(dump(remoteFilesToBeConsumed))
-    print("Files to be deleted")
-    print(dump(localFilesToBeRemoved))
 
     print("Fetching...")
     fetchMissing(remoteFilesToBeConsumed)
+    print("Deleting stale...")
+    remove(localFilesToBeRemoved)
 
-    -- TODO: implement delete, fetch
 
+    print("Operation finished, executing main.lua")
+    os.sleep(0.2)
+    term.clear()
+    local iterator = fs.list("./sync")
+    if iterator then
+        for entry in iterator do
+            full_path = fs.concat("./sync", entry)
+            if full_path == "sync/main.lua" then
+                status, err = pcall(dofile, "/" .. full_path)
+                color.blue()
+                if status then
+                    print("Excecution Finished")
+                else
+                    print("Error occurred during execution!")
+                    io.write(err)
+                    print("")
+                end
+                return
+            end
+        end
+    end
+    color.red()
+    print("main.lua not found!!!")
+    color.clear()
+end
 
-    print("--- Next loop ---")
-    os.sleep(5)
+local function pressAnyToContinue()
+    print("Press enter to continue...")
+    local _ = io.read()
+end
+
+while true do
+    term.clear()
+    local status, res = pcall(doRequest, URL .. "/ping")
+    if status then
+        print("Bound to server:", URL)
+    else
+        print("Error while testing connection, err:", res)
+        return
+    end
+    print("Press 'e' to fetch and execute program")
+    local s = io.read()
+    if s == "e" or s == "E" then
+        workFiles()
+        pressAnyToContinue()
+        color.clear()
+    end
 end

@@ -33,4 +33,9 @@ def getfile(filepath):
     return Response(response=file_content, status=200, mimetype="text/plain")
 
 
+@app.route("/ping")
+def ping():
+    return "pong"
+
+
 app.run("0.0.0.0", 51820, debug=True)
